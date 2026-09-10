@@ -31,6 +31,11 @@ class BloxelToolSettings(bpy.types.PropertyGroup):
         items=[('CONNECTED', "Connected", "Select the connected region of same-material voxels"),
                ('MATERIAL', "Material", "Select all voxels sharing the clicked material")],
         default='CONNECTED')
+    rect_select_mode: bpy.props.EnumProperty(
+        name="Rectangle",
+        items=[('VISIBLE', "Visible Only", "Select only voxels visible from the current view"),
+               ('THROUGH', "Strikethrough", "Select all voxels in the rectangle, including hidden ones")],
+        default='VISIBLE')
 
 
 def _draw_brush_settings(context, layout, tool):
@@ -62,6 +67,10 @@ def _draw_fill_settings(context, layout, tool):
 
 def _draw_select_settings(context, layout, tool):
     layout.prop(context.scene.bloxel_tools, "select_mode", expand=True)
+
+
+def _draw_rect_select_settings(context, layout, tool):
+    layout.prop(context.scene.bloxel_tools, "rect_select_mode", expand=True)
 
 
 class BLOXEL_WT_brush(bpy.types.WorkSpaceTool):
@@ -116,11 +125,25 @@ class BLOXEL_WT_select(bpy.types.WorkSpaceTool):
     bl_label = "Voxel Fuzzy Select"
     bl_description = ("Select voxels of one material: connected region or "
                       "global (Shift adds, Ctrl removes)")
-    bl_icon = "ops.generic.select_box"
+    bl_icon = "ops.sculpt.mask_by_color"
     bl_keymap = (
         ("bloxel.fuzzy_select", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
     )
     draw_settings = staticmethod(_draw_select_settings)
+
+
+class BLOXEL_WT_rect_select(bpy.types.WorkSpaceTool):
+    bl_space_type = 'VIEW_3D'
+    bl_context_mode = 'OBJECT'
+    bl_idname = "bloxel.rect_select_tool"
+    bl_label = "Voxel Rectangle Select"
+    bl_description = ("Drag a rectangle to select the voxels it covers: "
+                      "visible only or strikethrough")
+    bl_icon = "ops.generic.select_box"
+    bl_keymap = (
+        ("bloxel.rect_select", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+    )
+    draw_settings = staticmethod(_draw_rect_select_settings)
 
 
 class BLOXEL_WT_extrude(bpy.types.WorkSpaceTool):

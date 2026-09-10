@@ -14,7 +14,7 @@ import bpy
 import gpu
 import numpy as np
 from gpu_extras.batch import batch_for_shader
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 from . import state
 
@@ -90,7 +90,8 @@ def tag_redraw_all() -> None:
 _GRID_COLOR = (0.45, 0.45, 0.45, 0.55)
 
 _overlay_handler = None
-_highlights: list["Highlight"] = []
+# Highlight / ScreenRect overlays, stopped together on unregister
+_highlights: list = []
 _overlay_cache_key = None
 _overlay_cache_batch = None
 
@@ -301,6 +302,81 @@ def _draw_selection_impl():
     _selection_cache_lines.draw(shader)
     gpu.state.line_width_set(1.0)
     gpu.state.blend_set('NONE')
+
+
+class ScreenRect:
+    """Screen-space rectangle feedback for box-select drags (POST_PIXEL).
+
+    Coordinates are region pixels. The rectangle draws only in the viewport
+    region that started the drag. It lives in the same overlay list as
+    Highlight, so add-on unregister stops it too.
+    """
+
+    _FILL = (0.35, 0.65, 1.00, 0.20)
+    _OUTLINE = (0.75, 0.88, 1.00, 0.90)
+
+    def __init__(self) -> None:
+        self._handler = None
+        self._region_ptr = None
+        self.p0 = (0.0, 0.0)
+        self.p1 = (0.0, 0.0)
+
+    def start(self) -> None:
+        self._handler = bpy.types.SpaceView3D.draw_handler_add(
+            self._draw, (), 'WINDOW', 'POST_PIXEL')
+        _highlights.append(self)
+
+    def stop(self) -> None:
+        if self._handler is not None:
+            bpy.types.SpaceView3D.draw_handler_remove(self._handler, 'WINDOW')
+            self._handler = None
+        if self in _highlights:
+            _highlights.remove(self)
+        tag_redraw_all()
+
+    def set(self, region, p0, p1) -> None:
+        self._region_ptr = region.as_pointer() if region is not None else None
+        self.p0 = (float(p0[0]), float(p0[1]))
+        self.p1 = (float(p1[0]), float(p1[1]))
+
+    def _draw(self) -> None:
+        try:
+            self._draw_impl()
+        except Exception:
+            _report_draw_error_once()
+
+    def _draw_impl(self) -> None:
+        region = getattr(bpy.context, "region", None)
+        if region is None or region.as_pointer() != self._region_ptr:
+            return
+        w = max(region.width, 1)
+        h = max(region.height, 1)
+        x0, x1 = sorted((self.p0[0], self.p1[0]))
+        y0, y1 = sorted((self.p0[1], self.p1[1]))
+
+        def to_ndc(x: float, y: float) -> tuple:
+            return (x / w * 2.0 - 1.0, y / h * 2.0 - 1.0, 0.0)
+
+        a, b = to_ndc(x0, y0), to_ndc(x1, y0)
+        c, d = to_ndc(x1, y1), to_ndc(x0, y1)
+        shader = _uniform_color_shader()
+        line_batch = batch_for_shader(shader, 'LINES',
+                                      {"pos": [a, b, b, c, c, d, d, a]})
+        tri_batch = batch_for_shader(shader, 'TRIS', {"pos": [a, b, c, a, c, d]})
+        gpu.matrix.push()
+        gpu.matrix.load_projection_matrix(Matrix.Identity(4))
+        gpu.matrix.load_matrix(Matrix.Identity(4))
+        gpu.state.blend_set('ALPHA')
+        gpu.state.depth_test_set('NONE')
+        gpu.state.line_width_set(2.0)
+        shader.bind()
+        shader.uniform_float("color", self._FILL)
+        tri_batch.draw(shader)
+        shader.uniform_float("color", self._OUTLINE)
+        line_batch.draw(shader)
+        gpu.state.line_width_set(1.0)
+        gpu.matrix.pop()
+        gpu.state.blend_set('NONE')
 
 
 class Highlight:

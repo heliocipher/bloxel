@@ -285,6 +285,63 @@ check("selecting a different material stops at it",
       select_region(gs, (4, 0, 0), s0, s1, contiguous=True) == {(4, 0, 0)})
 
 # ---------------------------------------------------------------------------
+section("grid: rectangle select (screen space)")
+from bloxel.core.grid import rectangle_select
+
+# identity mvp: local == NDC, so cell (x, y, z) centres land on
+# ((x + 1.5) * 16, (y + 1.5) * 16) in a 32x32 region
+IDENT = np.eye(4)
+rs0, rs1 = (0, 0, 0), (31, 31, 31)
+g_rs = VoxelGrid()
+for cell in ((0, 0, 0), (1, 0, 0), (5, 0, 0)):
+    g_rs.set(*cell, 1)
+sel = rectangle_select(g_rs, (20, 20, 30, 30), IDENT, 32, 32, rs0, rs1,
+                       visible_only=False)
+check("strikethrough selects voxels with their centre in the rect",
+      sel == {(0, 0, 0)})
+sel = rectangle_select(g_rs, (45, 30, 20, 20), IDENT, 32, 32, rs0, rs1,
+                       visible_only=False)
+check("rectangle corners may be given in any order",
+      sel == {(0, 0, 0), (1, 0, 0)})
+sel = rectangle_select(g_rs, (20, 20, 110, 30), IDENT, 32, 32, (0, 0, 0), (0, 0, 0),
+                       visible_only=False)
+check("rectangle select respects the working volume bounds",
+      sel == {(0, 0, 0)})
+check("rectangle select on an empty grid is empty",
+      rectangle_select(VoxelGrid(), (0, 0, 32, 32), IDENT, 32, 32,
+                       rs0, rs1) == set())
+
+g_oc = VoxelGrid()
+for z in range(3):
+    g_oc.set(0, 0, z, 1)
+sel = rectangle_select(g_oc, (20, 20, 30, 30), IDENT, 32, 32, rs0, rs1,
+                       visible_only=True)
+check("visible-only keeps the front voxel of a column",
+      sel == {(0, 0, 0)})
+sel = rectangle_select(g_oc, (20, 20, 30, 30), IDENT, 32, 32, rs0, rs1,
+                       visible_only=False)
+check("strikethrough keeps the whole column",
+      sel == {(0, 0, 0), (0, 0, 1), (0, 0, 2)})
+sel = rectangle_select(g_rs, (16, 16, 23, 23), IDENT, 32, 32, rs0, rs1,
+                       visible_only=True)
+sel_t = rectangle_select(g_rs, (16, 16, 23, 23), IDENT, 32, 32, rs0, rs1,
+                         visible_only=False)
+check("visible-only rays select a partially covered voxel",
+      sel == {(0, 0, 0)})
+check("strikethrough needs the projected centre inside the rect",
+      sel_t == set())
+
+# non-identity matrix: local 0..32 maps 1:1 onto the 32x32 region
+ORTHO = np.array([[1 / 16, 0, 0, -1],
+                  [0, 1 / 16, 0, -1],
+                  [0, 0, 1 / 16, -1],
+                  [0, 0, 0, 1]], dtype=float)
+sel = rectangle_select(g_oc, (0, 0, 4, 4), ORTHO, 32, 32, rs0, rs1,
+                       visible_only=True)
+check("rectangle select handles a non-identity view matrix",
+      sel == {(0, 0, 0)})
+
+# ---------------------------------------------------------------------------
 section("grid: stroke mask (plane-locked drag)")
 from bloxel.core.grid import StrokeMaskGrid
 
@@ -552,6 +609,10 @@ check("fuzzy select op registered",
       bpy.ops.bloxel.fuzzy_select.get_rna_type() is not None)
 check("select mode default is connected",
       bpy.context.scene.bloxel_tools.select_mode == 'CONNECTED')
+check("rectangle select op registered",
+      bpy.ops.bloxel.rect_select.get_rna_type() is not None)
+check("rect select mode default is visible",
+      bpy.context.scene.bloxel_tools.rect_select_mode == 'VISIBLE')
 check("cursor op registered", bpy.ops.bloxel.brush_cursor.get_rna_type() is not None)
 check("extrude op registered", bpy.ops.bloxel.extrude.get_rna_type() is not None)
 check("export op registered", bpy.ops.bloxel.export_godot.get_rna_type() is not None)

@@ -28,6 +28,7 @@ _CLASSES = (
     brush.BLOXEL_OT_brush_cursor,
     fill.BLOXEL_OT_fill,
     select.BLOXEL_OT_fuzzy_select,
+    select.BLOXEL_OT_rect_select,
     extrude.BLOXEL_OT_extrude,
     picker.BLOXEL_OT_picker,
     panels.BLOXEL_UL_palette,
@@ -39,6 +40,7 @@ _TOOLS = (
     workspace.BLOXEL_WT_eraser,
     workspace.BLOXEL_WT_fill,
     workspace.BLOXEL_WT_select,
+    workspace.BLOXEL_WT_rect_select,
     workspace.BLOXEL_WT_extrude,
     workspace.BLOXEL_WT_picker,
 )

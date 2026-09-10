@@ -341,6 +341,138 @@ def select_region(grid: VoxelGrid, start: Vec3, bmin: Vec3, bmax: Vec3,
 
 
 # ---------------------------------------------------------------------------
+# screen-space rectangle selection
+
+def _occupied_cells(grid: VoxelGrid, bmin: Vec3, bmax: Vec3) -> np.ndarray:
+    """(N, 3) int64 cells of every occupied voxel inside the bounds."""
+    parts = []
+    for (cx, cy, cz), chunk in grid.chunks.items():
+        xs, ys, zs = np.nonzero(chunk)
+        if xs.size == 0:
+            continue
+        parts.append(np.stack((xs + cx * CHUNK, ys + cy * CHUNK,
+                               zs + cz * CHUNK), axis=1))
+    if not parts:
+        return np.zeros((0, 3), dtype=np.int64)
+    cells = np.concatenate(parts).astype(np.int64)
+    lo = np.asarray(bmin, dtype=np.int64)
+    hi = np.asarray(bmax, dtype=np.int64)
+    return cells[((cells >= lo) & (cells <= hi)).all(axis=1)]
+
+
+def _project(points: np.ndarray, mvp: np.ndarray, width: int, height: int):
+    """(sx, sy, ndc_z, front) screen data for local points under mvp.
+
+    Screen coords follow location_3d_to_region_2d: half the region plus half
+    the region times the homogeneous x/w, y/w. `front` is False for points
+    behind the camera, where the projection is not meaningful.
+    """
+    homo = np.concatenate([points, np.ones((points.shape[0], 1))], axis=1)
+    clip = homo @ mvp.T
+    w = clip[:, 3]
+    front = w > 1e-9
+    safe = np.where(front, w, 1.0)
+    ndc = clip[:, :3] / safe[:, None]
+    sx = (ndc[:, 0] + 1.0) * 0.5 * width
+    sy = (ndc[:, 1] + 1.0) * 0.5 * height
+    return sx, sy, ndc[:, 2], front
+
+
+def _voxel_pixels(point, mvp: np.ndarray, width: int, height: int) -> float:
+    """Largest screen size in pixels of one local unit cube at `point`."""
+    probe = np.asarray([point, point + (1, 0, 0), point + (0, 1, 0),
+                        point + (0, 0, 1)])
+    sx, sy, _, front = _project(probe, mvp, width, height)
+    if not front[0]:
+        return 1.0
+    return max(math.hypot(sx[i] - sx[0], sy[i] - sy[0]) for i in (1, 2, 3))
+
+
+def _axis_samples(lo: float, hi: float, step: float) -> np.ndarray:
+    """Sample positions covering [lo, hi]; the centre when it fits nowhere."""
+    start = lo + step * 0.5
+    if start >= hi:
+        return np.array([(lo + hi) * 0.5])
+    return np.arange(start, hi, step)
+
+
+def _viewport_rays(xs: np.ndarray, ys: np.ndarray, mvp: np.ndarray,
+                   width: int, height: int):
+    """(origins, directions) in local space for screen sample points.
+
+    Clip-space near/far points are unprojected through the inverse mvp, so
+    the same path covers perspective and orthographic views.
+    """
+    inv = np.linalg.inv(mvp)
+    ndc_x = xs / width * 2.0 - 1.0
+    ndc_y = ys / height * 2.0 - 1.0
+    ones = np.ones_like(ndc_x)
+
+    def unproject(z: float) -> np.ndarray:
+        clip = np.stack([ndc_x, ndc_y, np.full_like(ndc_x, z), ones], axis=1)
+        pts = clip @ inv.T
+        return pts[:, :3] / pts[:, 3:4]
+
+    near = unproject(-1.0)
+    return near, unproject(1.0) - near
+
+
+def rectangle_select(grid: VoxelGrid, rect, mvp, width: int, height: int,
+                     bmin: Vec3, bmax: Vec3, visible_only: bool = True,
+                     max_samples: int = 4096) -> set:
+    """Voxels covered by a screen-space rectangle.
+
+    rect: (x0, y0, x1, y1) in region pixels (corners in any order).
+    mvp: 4x4 object-local -> clip matrix (region perspective @ matrix_world).
+
+    visible_only=True: sample rays across the rectangle and keep the first
+        voxel each ray hits, so occluded voxels stay unselected.
+    visible_only=False (strikethrough): keep every voxel whose projected
+        centre is inside the rectangle, including voxels behind the surface.
+
+    Both modes ignore voxels outside [bmin, bmax]. Ray density is half a
+    projected voxel at the nearest candidate, coarsened so the sample grid
+    stays under `max_samples` rays.
+    """
+    mvp = np.asarray(mvp, dtype=np.float64)
+    x0, x1 = sorted((float(rect[0]), float(rect[2])))
+    y0, y1 = sorted((float(rect[1]), float(rect[3])))
+    cells = _occupied_cells(grid, bmin, bmax)
+    if cells.shape[0] == 0:
+        return set()
+    centers = cells + 0.5
+    sx, sy, depth, front = _project(centers, mvp, width, height)
+    if not visible_only:
+        inside = front & (sx >= x0) & (sx <= x1) & (sy >= y0) & (sy <= y1)
+        return {tuple(int(v) for v in cell) for cell in cells[inside]}
+
+    # step estimation: nearest front voxel to the rectangle (its centre may
+    # sit outside while the rectangle still covers part of the voxel)
+    half_w, half_h = (x1 - x0) * 0.5, (y1 - y0) * 0.5
+    cx, cy = x0 + half_w, y0 + half_h
+    dist = np.hypot(np.maximum(np.abs(sx - cx) - half_w, 0.0),
+                    np.maximum(np.abs(sy - cy) - half_h, 0.0))
+    mid = int(np.argmin(np.where(front, dist, np.inf)))
+    if not np.isfinite(dist[mid]) or not front[mid]:
+        return set()
+    step = _voxel_pixels(centers[mid], mvp, width, height) * 0.5
+    step = max(1.0, step,
+               math.sqrt(max(x1 - x0, 1.0) * max(y1 - y0, 1.0) / max_samples))
+
+    xs = _axis_samples(x0, x1, step)
+    ys = _axis_samples(y0, y1, step)
+    gx, gy = np.meshgrid(xs, ys)
+    origins, directions = _viewport_rays(gx.ravel(), gy.ravel(),
+                                         mvp, width, height)
+    selected = set()
+    for origin, direction in zip(origins, directions):
+        res = raycast(grid, origin, direction, bmin, bmax)
+        if res.hit is not None:
+            selected.add(res.hit.cell)
+    return selected
+
+
+# ---------------------------------------------------------------------------
 # ray casting (sparse DDA with empty-chunk skipping)
 
 _EPS = 1e-6
