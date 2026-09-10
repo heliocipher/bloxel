@@ -13,4 +13,15 @@ license = [
   "SPDX:GPL-3.0-or-later",
 ]
 
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  # hidden dot-files (.DS_Store, .git, ...)
+  ".*",
+  # packages built in-source
+  "/*.zip",
+  "dist/",
+  "*.blend[1-9]",
+]
+
 [permissions]
