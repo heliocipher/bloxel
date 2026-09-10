@@ -38,6 +38,8 @@ class BLOXEL_PT_main(bpy.types.Panel):
             col.label(text="Min exceeds Max on some axis", icon='ERROR')
         rt = state.runtime(obj)
         box.label(text=f"Voxels: {rt.grid.voxel_count()}")
+        if rt.selection:
+            box.label(text=f"Selected: {len(rt.selection)}")
 
         box = layout.box()
         box.label(text="Palette")

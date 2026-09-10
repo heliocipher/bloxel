@@ -217,6 +217,92 @@ def _draw_overlay_impl():
     gpu.state.blend_set('NONE')
 
 
+# ---------------------------------------------------------------------------
+# selection overlay (fuzzy select tool)
+#
+# Unlike Highlight, this reads the live selection set from the runtime on
+# every draw, so undo/redo/load restore the selection display with no extra
+# handlers. Geometry is built with numpy: a selection can hold many thousands
+# of cells and a per-cell Python loop would stall the viewport.
+
+_SELECTION_COLOR = (1.00, 0.85, 0.10, 0.40)
+_SELECTION_MAX_CELLS = 65536  # display cap for pathologically large selections
+
+_NP_EDGE_A = np.asarray([a for a, _ in _EDGES], dtype=np.float32)
+_NP_EDGE_B = np.asarray([b for _, b in _EDGES], dtype=np.float32)
+_NP_TOP_TRI = np.asarray([[0, 0, 1], [1, 0, 1], [1, 1, 1],
+                          [0, 0, 1], [1, 1, 1], [0, 1, 1]], dtype=np.float32)
+_EMPTY_PTS = np.zeros((0, 3), dtype=np.float32)
+
+_selection_handler = None
+_selection_cache_key = None
+_selection_cache_lines = None
+_selection_cache_tris = None
+
+
+def selection_geometry(cells, mw):
+    """World-space (line points (24N, 3), top-face (6N, 3)) for the cells.
+
+    One wireframe box and one top-face fill per cell, both vectorized.
+    Cells above _SELECTION_MAX_CELLS are dropped; set order is arbitrary,
+    which is fine because an arbitrary subset still marks the selection.
+    """
+    arr = np.asarray(list(cells)[:_SELECTION_MAX_CELLS],
+                     dtype=np.float32).reshape(-1, 3)
+    if arr.shape[0] == 0:
+        return _EMPTY_PTS, _EMPTY_PTS
+    starts = arr[:, None, :] + _NP_EDGE_A[None, :, :]
+    ends = arr[:, None, :] + _NP_EDGE_B[None, :, :]
+    local_lines = np.stack([starts, ends], axis=2).reshape(-1, 3)
+    local_tris = (arr[:, None, :] + _NP_TOP_TRI[None, :, :]).reshape(-1, 3)
+    rot = np.array(mw.to_3x3(), dtype=np.float64).T
+    trans = np.array(mw.translation, dtype=np.float64)
+    lines = (local_lines.astype(np.float64) @ rot + trans).astype(np.float32)
+    tris = (local_tris.astype(np.float64) @ rot + trans).astype(np.float32)
+    return lines, tris
+
+
+def _draw_selection():
+    try:
+        _draw_selection_impl()
+    except Exception:
+        _report_draw_error_once()
+
+
+def _draw_selection_impl():
+    global _selection_cache_key, _selection_cache_lines, _selection_cache_tris
+    context = bpy.context
+    obj = getattr(context, "active_object", None)
+    if not state.is_bloxel(obj):
+        return
+    rt = state.runtime(obj)
+    if not rt.selection:
+        return
+    mw = obj.matrix_world
+    # rev identifies the selection content: it changes on every commit and is
+    # restored by undo/redo, so stale batches cannot survive a history step.
+    # as_pointer guards against a different object that reuses the name+rev.
+    key = (obj.as_pointer(), rt.rev, tuple(mw))
+    if key != _selection_cache_key:
+        shader = _uniform_color_shader()
+        lines, tris = selection_geometry(rt.selection, mw)
+        _selection_cache_lines = batch_for_shader(shader, 'LINES', {"pos": lines})
+        _selection_cache_tris = batch_for_shader(shader, 'TRIS', {"pos": tris})
+        _selection_cache_key = key
+
+    shader = _uniform_color_shader()
+    gpu.state.blend_set('ALPHA')
+    gpu.state.depth_test_set('LESS_EQUAL')
+    shader.bind()
+    shader.uniform_float("color", _SELECTION_COLOR)
+    _selection_cache_tris.draw(shader)
+    gpu.state.line_width_set(2.0)
+    shader.uniform_float("color", (*_SELECTION_COLOR[:3], 1.0))
+    _selection_cache_lines.draw(shader)
+    gpu.state.line_width_set(1.0)
+    gpu.state.blend_set('NONE')
+
+
 class Highlight:
     """Translucent highlight of the cells a tool is about to affect.
 
@@ -345,19 +431,27 @@ class Highlight:
 
 
 def register() -> None:
-    global _overlay_handler, _overlay_error_reported, _overlay_cache_key, _overlay_shader
+    global _overlay_handler, _selection_handler, _overlay_error_reported
+    global _overlay_cache_key, _overlay_shader, _selection_cache_key
     _overlay_error_reported = False
     _overlay_cache_key = None
     _overlay_shader = None
+    _selection_cache_key = None
     if _overlay_handler is None:
         _overlay_handler = bpy.types.SpaceView3D.draw_handler_add(
             _draw_overlay, (), 'WINDOW', 'POST_VIEW')
+    if _selection_handler is None:
+        _selection_handler = bpy.types.SpaceView3D.draw_handler_add(
+            _draw_selection, (), 'WINDOW', 'POST_VIEW')
 
 
 def unregister() -> None:
-    global _overlay_handler
+    global _overlay_handler, _selection_handler
     for highlight in list(_highlights):
         highlight.stop()
     if _overlay_handler is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_overlay_handler, 'WINDOW')
         _overlay_handler = None
+    if _selection_handler is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(_selection_handler, 'WINDOW')
+        _selection_handler = None

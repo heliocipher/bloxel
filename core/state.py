@@ -57,6 +57,10 @@ def runtime(obj) -> Runtime:
 def commit(obj, rt: Runtime | None = None) -> None:
     """Persist the runtime state into ID properties (undo snapshot point)."""
     rt = rt or runtime(obj)
+    if rt.selection:
+        # selection always refers to live voxels: edits that empty a selected
+        # cell (eraser, extrude delete) drop it from the selection here
+        rt.selection = {cell for cell in rt.selection if rt.grid.get(*cell) != 0}
     obj[GRID_PROP] = serialize.dumps(rt.grid, rt.selection)
     rev = obj.get(REV_PROP, 0) + 1
     obj[REV_PROP] = rev

@@ -26,6 +26,11 @@ class BloxelToolSettings(bpy.types.PropertyGroup):
         items=[('CONTIGUOUS', "Contiguous", "Fill the connected region of same-material voxels"),
                ('GLOBAL', "Global", "Fill all voxels sharing the clicked material")],
         default='CONTIGUOUS')
+    select_mode: bpy.props.EnumProperty(
+        name="Select",
+        items=[('CONNECTED', "Connected", "Select the connected region of same-material voxels"),
+               ('MATERIAL', "Material", "Select all voxels sharing the clicked material")],
+        default='CONNECTED')
 
 
 def _draw_brush_settings(context, layout, tool):
@@ -53,6 +58,10 @@ def _draw_eraser_settings(context, layout, tool):
 
 def _draw_fill_settings(context, layout, tool):
     layout.prop(context.scene.bloxel_tools, "fill_mode", expand=True)
+
+
+def _draw_select_settings(context, layout, tool):
+    layout.prop(context.scene.bloxel_tools, "select_mode", expand=True)
 
 
 class BLOXEL_WT_brush(bpy.types.WorkSpaceTool):
@@ -98,6 +107,20 @@ class BLOXEL_WT_fill(bpy.types.WorkSpaceTool):
         ("bloxel.fill", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
     )
     draw_settings = staticmethod(_draw_fill_settings)
+
+
+class BLOXEL_WT_select(bpy.types.WorkSpaceTool):
+    bl_space_type = 'VIEW_3D'
+    bl_context_mode = 'OBJECT'
+    bl_idname = "bloxel.select_tool"
+    bl_label = "Voxel Fuzzy Select"
+    bl_description = ("Select voxels of one material: connected region or "
+                      "global (Shift adds, Ctrl removes)")
+    bl_icon = "ops.generic.select_box"
+    bl_keymap = (
+        ("bloxel.fuzzy_select", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+    )
+    draw_settings = staticmethod(_draw_select_settings)
 
 
 class BLOXEL_WT_extrude(bpy.types.WorkSpaceTool):

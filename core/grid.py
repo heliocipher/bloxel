@@ -279,20 +279,65 @@ def flood_fill(grid: VoxelGrid, start: Vec3, mat: int, bmin: Vec3, bmax: Vec3,
                 changed += int(mask.sum())
         return changed
     changed = 0
+    for cell in connected_material_region(grid, start, bmin, bmax):
+        if grid.set(*cell, mat):
+            changed += 1
+    return changed
+
+
+def connected_material_region(grid: VoxelGrid, start: Vec3,
+                              bmin: Vec3, bmax: Vec3) -> set:
+    """6-connected region of cells sharing the start cell's material.
+
+    Empty start cells give an empty region. The walk stays inside the
+    working volume, like the contiguous flood fill.
+    """
+    target = grid.get(*start)
+    if target == EMPTY:
+        return set()
+    region: set[Vec3] = set()
     stack = [start]
     seen = {start}
     while stack:
         cell = stack.pop()
         if grid.get(*cell) != target:
             continue
-        grid.set(*cell, mat)
-        changed += 1
+        region.add(cell)
         for d in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
             n = (cell[0] + d[0], cell[1] + d[1], cell[2] + d[2])
             if n not in seen and in_bounds(n, bmin, bmax):
                 seen.add(n)
                 stack.append(n)
-    return changed
+    return region
+
+
+def material_cells(grid: VoxelGrid, mat: int) -> set:
+    """Every cell in the grid holding `mat` (numpy scan; ignores bounds)."""
+    cells: set[Vec3] = set()
+    for (cx, cy, cz), chunk in grid.chunks.items():
+        xs, ys, zs = (idx.tolist() for idx in np.nonzero(chunk == mat))
+        bx, by, bz = cx * CHUNK, cy * CHUNK, cz * CHUNK
+        cells.update(zip((bx + x for x in xs),
+                         (by + y for y in ys),
+                         (bz + z for z in zs)))
+    return cells
+
+
+def select_region(grid: VoxelGrid, start: Vec3, bmin: Vec3, bmax: Vec3,
+                  contiguous: bool = True) -> set:
+    """Cells the fuzzy select tool picks from the start cell.
+
+    contiguous=True:  the connected region of same-material voxels (bounded).
+    contiguous=False: every voxel with the start voxel's material, matching
+                      the global fill mode (ignores the working volume).
+    Empty start cells select nothing.
+    """
+    target = grid.get(*start)
+    if target == EMPTY:
+        return set()
+    if contiguous:
+        return connected_material_region(grid, start, bmin, bmax)
+    return material_cells(grid, target)
 
 
 # ---------------------------------------------------------------------------

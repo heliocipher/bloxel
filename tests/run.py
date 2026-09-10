@@ -259,6 +259,32 @@ changed = flood_fill(gf, (4, 0, 0), 7, fb0, fb1, contiguous=True)
 check("contiguous fill on different material", changed == 1 and gf.get(4, 0, 0) == 7)
 
 # ---------------------------------------------------------------------------
+section("grid: fuzzy select regions")
+from bloxel.core.grid import select_region
+
+gs = VoxelGrid()
+s0, s1 = (0, 0, 0), (63, 63, 63)
+for x in range(4):
+    gs.set(x, 0, 0, 1)
+gs.set(10, 0, 0, 1)    # same material, disconnected
+gs.set(4, 0, 0, 2)     # different material next to the run
+gs.set(1000, 0, 0, 1)  # same material, far outside the working volume
+sel = select_region(gs, (0, 0, 0), s0, s1, contiguous=True)
+check("connected select: only the connected same-material region",
+      sel == {(x, 0, 0) for x in range(4)})
+sel = select_region(gs, (0, 0, 0), s0, s1, contiguous=False)
+check("material select: every voxel of the clicked material",
+      sel == {(x, 0, 0) for x in range(4)} | {(10, 0, 0), (1000, 0, 0)})
+check("select on an empty cell is empty",
+      select_region(gs, (50, 50, 50), s0, s1, contiguous=True) == set())
+sel = select_region(gs, (0, 0, 0), (0, 0, 0), (2, 63, 63), contiguous=True)
+check("connected select respects the working volume bounds",
+      sel == {(0, 0, 0), (1, 0, 0), (2, 0, 0)})
+check("select region leaves the grid untouched", gs.voxel_count() == 7)
+check("selecting a different material stops at it",
+      select_region(gs, (4, 0, 0), s0, s1, contiguous=True) == {(4, 0, 0)})
+
+# ---------------------------------------------------------------------------
 section("grid: stroke mask (plane-locked drag)")
 from bloxel.core.grid import StrokeMaskGrid
 
@@ -477,6 +503,24 @@ check("entry cell sits on the drawn z=32 grid",
       res.entry_cell == (5, 5, 31))
 
 # ---------------------------------------------------------------------------
+section("draw: selection overlay geometry")
+from bloxel.core.draw import selection_geometry
+from mathutils import Matrix
+
+lines, tris = selection_geometry({(0, 0, 0)}, Matrix.Identity(4))
+check("selection geometry: 12 box edges per cell", lines.shape == (24, 3))
+check("selection geometry: one top-face fill per cell", tris.shape == (6, 3))
+lines, tris = selection_geometry(set(), Matrix.Identity(4))
+check("selection geometry: empty selection draws nothing",
+      lines.shape[0] == 0 and tris.shape[0] == 0)
+lines, tris = selection_geometry({(0, 0, 0), (1, 2, 3)}, Matrix.Identity(4))
+check("selection geometry: two cells scale linearly",
+      lines.shape == (48, 3) and tris.shape == (12, 3))
+check("selection geometry: box corners stay on the cell",
+      lines[:, 0].min() == 0.0 and lines[:, 0].max() == 2.0
+      and lines[:, 1].min() == 0.0 and lines[:, 1].max() == 3.0)
+
+# ---------------------------------------------------------------------------
 section("blender integration")
 import bpy
 import bloxel
@@ -504,6 +548,10 @@ check("brush tool_mode default", brush_props['tool_mode'].default == 'BRUSH')
 eraser_props = bpy.ops.bloxel.eraser.get_rna_type().properties
 check("eraser tool_mode default", eraser_props['tool_mode'].default == 'ERASER')
 check("fill op registered", bpy.ops.bloxel.fill.get_rna_type() is not None)
+check("fuzzy select op registered",
+      bpy.ops.bloxel.fuzzy_select.get_rna_type() is not None)
+check("select mode default is connected",
+      bpy.context.scene.bloxel_tools.select_mode == 'CONNECTED')
 check("cursor op registered", bpy.ops.bloxel.brush_cursor.get_rna_type() is not None)
 check("extrude op registered", bpy.ops.bloxel.extrude.get_rna_type() is not None)
 check("export op registered", bpy.ops.bloxel.export_godot.get_rna_type() is not None)
@@ -643,6 +691,26 @@ extrude_region(rt_e.grid, region, (0, 0, 1), 2, 1, (0, 0, 0), (31, 31, 31))
 mesher.rebuild_mesh(obj_e, rt_e)
 check("extrude integration: 3-voxel column -> 14 quads",
       len(obj_e.data.polygons) == 14)
+
+# ---------------------------------------------------------------------------
+section("fuzzy select: persisted selection + commit prune")
+bpy.ops.bloxel.new_model('EXEC_DEFAULT')
+obj_s = bpy.context.active_object
+rt_s = state.runtime(obj_s)
+for x in range(4):
+    rt_s.grid.set(x, 0, 0, 1)
+rt_s.grid.set(20, 20, 20, 2)
+rt_s.selection = select_region(rt_s.grid, (0, 0, 0), (0, 0, 0), (31, 31, 31),
+                               contiguous=True)
+state.commit(obj_s, rt_s)
+state.clear_runtimes()
+rt_s2 = state.runtime(obj_s)
+check("selection survives commit + reload",
+      rt_s2.selection == {(x, 0, 0) for x in range(4)})
+rt_s2.grid.set(2, 0, 0, 0)  # erase one selected voxel (eraser-style edit)
+state.commit(obj_s, rt_s2)
+check("commit prunes erased cells from the selection",
+      rt_s2.selection == {(0, 0, 0), (1, 0, 0), (3, 0, 0)})
 
 # ---------------------------------------------------------------------------
 section("regressions: cancel restore, empty palette, inverted bounds")
