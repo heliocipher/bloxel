@@ -1,6 +1,6 @@
-# Bloxel
+# Bloxel Add-on
 
-Bloxel is a voxel modeling add-on for Blender.
+Bloxel Add-on is a voxel modeling add-on for Blender.
 
 ## Requirements
 
