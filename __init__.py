@@ -13,10 +13,10 @@ bl_info = {
     "category": "3D View",
 }
 
-from .core import draw, palette, state  # noqa: E402
+from .core import draw, gizmo, palette, state  # noqa: E402
 from .ops import basic, export  # noqa: E402
 from .tools import (brush, common, extrude, fill, line, picker,  # noqa: E402
-                    select, workspace)
+                    select, transform, workspace)
 from .ui import panels  # noqa: E402
 
 _CLASSES = (
@@ -31,6 +31,7 @@ _CLASSES = (
     fill.BLOXEL_OT_fill,
     select.BLOXEL_OT_fuzzy_select,
     select.BLOXEL_OT_rect_select,
+    transform.BLOXEL_OT_transform,
     extrude.BLOXEL_OT_extrude,
     picker.BLOXEL_OT_picker,
     panels.BLOXEL_UL_palette,
@@ -44,6 +45,7 @@ _TOOLS = (
     workspace.BLOXEL_WT_fill,
     workspace.BLOXEL_WT_select,
     workspace.BLOXEL_WT_rect_select,
+    workspace.BLOXEL_WT_transform,
     workspace.BLOXEL_WT_extrude,
     workspace.BLOXEL_WT_picker,
 )
@@ -66,6 +68,7 @@ def register() -> None:
             handler_list.append(state.history_changed)
     palette.register_msgbus()
     draw.register()
+    gizmo.register()
     basic.register_menu()
     for i, tool in enumerate(_TOOLS):
         bpy.utils.register_tool(tool, separator=(i == 0), group=(i == 0))
@@ -76,6 +79,7 @@ def unregister() -> None:
         bpy.utils.unregister_tool(tool)
     basic.unregister_menu()
     common.cursor_highlight_stop()
+    gizmo.unregister()
     draw.unregister()
     palette.unregister_msgbus()
     for handler_list in _HISTORY_HANDLERS:

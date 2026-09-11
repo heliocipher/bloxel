@@ -62,6 +62,20 @@ def cursor_highlight_stop() -> None:
         _cursor_highlight = None
 
 
+def drag_along_axis(press_mouse, mouse, screen_dir, screen_len) -> float:
+    """Signed voxel drag distance along an axis, from screen-space data.
+
+    press_mouse/mouse: (x, y) region coords. screen_dir: region-space vector
+    of one voxel along the axis. screen_len: its length. The result is in
+    voxels (negative when dragging against the axis).
+    """
+    if screen_len < 1e-6:
+        return 0.0
+    proj = ((mouse[0] - press_mouse[0]) * screen_dir[0]
+            + (mouse[1] - press_mouse[1]) * screen_dir[1]) / screen_len
+    return proj / screen_len
+
+
 def event_ray(context, event, obj):
     """Mouse event -> (origin, direction) in the object's local space."""
     region = context.region

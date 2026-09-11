@@ -158,6 +158,19 @@ class BLOXEL_WT_rect_select(bpy.types.WorkSpaceTool):
     draw_settings = staticmethod(_draw_rect_select_settings)
 
 
+class BLOXEL_WT_transform(bpy.types.WorkSpaceTool):
+    bl_space_type = 'VIEW_3D'
+    bl_context_mode = 'OBJECT'
+    bl_idname = "bloxel.transform_tool"
+    bl_label = "Voxel Move & Rotate"
+    bl_description = ("Move or rotate the selected voxels: drag the coloured "
+                      "axis arrows and rings")
+    bl_icon = "ops.transform.transform"
+    bl_keymap = (
+        ("bloxel.transform", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+    )
+
+
 class BLOXEL_WT_extrude(bpy.types.WorkSpaceTool):
     bl_space_type = 'VIEW_3D'
     bl_context_mode = 'OBJECT'

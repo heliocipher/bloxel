@@ -646,6 +646,181 @@ def walk_line(a: Vec3, b: Vec3) -> Iterator[Vec3]:
 
 
 # ---------------------------------------------------------------------------
+# selection transform (move / rotate)
+
+def selection_bounds(cells) -> tuple[Vec3, Vec3] | None:
+    """Inclusive min/max cell of a cell collection, or None when empty."""
+    it = iter(cells)
+    try:
+        first = next(it)
+    except StopIteration:
+        return None
+    mn = list(first)
+    mx = list(first)
+    for cell in it:
+        for i in range(3):
+            if cell[i] < mn[i]:
+                mn[i] = cell[i]
+            if cell[i] > mx[i]:
+                mx[i] = cell[i]
+    return (mn[0], mn[1], mn[2]), (mx[0], mx[1], mx[2])
+
+
+def transform_center(bounds) -> tuple[float, float, float]:
+    """Visual centre of a cell block: (min + max + 1) / 2 per axis.
+
+    Half-integer pivots keep 90-degree rotations on the integer lattice.
+    """
+    mn, mx = bounds
+    return ((mn[0] + mx[0] + 1) * 0.5,
+            (mn[1] + mx[1] + 1) * 0.5,
+            (mn[2] + mx[2] + 1) * 0.5)
+
+
+def clamp_offset(sel_min: Vec3, sel_max: Vec3, offset: Vec3,
+                 bmin: Vec3, bmax: Vec3) -> Vec3:
+    """Clamp a translation so the cell block stays inside the volume."""
+    out = []
+    for i in range(3):
+        lo = bmin[i] - sel_min[i]   # farthest negative offset that fits
+        hi = bmax[i] - sel_max[i]   # farthest positive offset that fits
+        if lo > hi:                 # block wider than the volume on this axis
+            lo = hi = 0
+        out.append(min(max(int(offset[i]), lo), hi))
+    return (out[0], out[1], out[2])
+
+
+def translated_cells(cells, offset: Vec3) -> dict:
+    """{source cell: translated cell} for a translation."""
+    dx, dy, dz = offset
+    return {cell: (cell[0] + dx, cell[1] + dy, cell[2] + dz) for cell in cells}
+
+
+def rotated_cells(cells, axis: int, quarter_turns: int, pivot) -> dict:
+    """{source cell: rotated cell} around `pivot` by 90-degree steps.
+
+    Cell centres rotate as unit cubes and snap to the containing cell, so
+    the mapping is a bijection for any turn count and four turns are the
+    identity. `axis` is 0/1/2 (rotation follows the right-hand rule).
+    """
+    quarter_turns %= 4
+    if quarter_turns == 0:
+        return {cell: cell for cell in cells}
+    px, py, pz = pivot
+    out = {}
+    for x, y, z in cells:
+        vx, vy, vz = x + 0.5 - px, y + 0.5 - py, z + 0.5 - pz
+        for _ in range(quarter_turns):
+            if axis == 0:
+                vy, vz = -vz, vy
+            elif axis == 1:
+                vz, vx = -vx, vz
+            else:
+                vx, vy = -vy, vx
+        out[(x, y, z)] = (math.floor(px + vx), math.floor(py + vy),
+                          math.floor(pz + vz))
+    return out
+
+
+def fit_offset(sel_min: Vec3, sel_max: Vec3, bmin: Vec3, bmax: Vec3) -> Vec3:
+    """Smallest translation that moves a cell block into the volume.
+
+    When the block is wider than the volume on an axis, the block aligns
+    with the volume minimum; cells still outside are dropped by the caller.
+    """
+    out = []
+    for i in range(3):
+        if sel_max[i] > bmax[i]:
+            out.append(bmax[i] - sel_max[i])
+        elif sel_min[i] < bmin[i]:
+            out.append(bmin[i] - sel_min[i])
+        else:
+            out.append(0)
+    return (out[0], out[1], out[2])
+
+
+def move_mapping(cells, offset: Vec3, bmin: Vec3, bmax: Vec3) -> dict:
+    """Translation mapping for a selection, clamped to the volume."""
+    inside = [cell for cell in cells if in_bounds(cell, bmin, bmax)]
+    bounds = selection_bounds(inside)
+    if bounds is None:
+        return {}
+    offset = clamp_offset(bounds[0], bounds[1], offset, bmin, bmax)
+    if offset == (0, 0, 0):
+        return {}
+    return translated_cells(cells, offset)
+
+
+def rotate_mapping(cells, axis: int, quarter_turns: int,
+                   bmin: Vec3, bmax: Vec3) -> dict:
+    """Rotation mapping around the selection centre, shifted into bounds."""
+    cells = list(cells)
+    bounds = selection_bounds(cells)
+    if bounds is None or quarter_turns % 4 == 0:
+        return {}
+    mapping = rotated_cells(cells, axis, quarter_turns,
+                            transform_center(bounds))
+    rotated_bounds = selection_bounds(mapping.values())
+    if rotated_bounds is None:
+        return {}
+    shift = fit_offset(rotated_bounds[0], rotated_bounds[1], bmin, bmax)
+    if shift == (0, 0, 0):
+        return mapping
+    dx, dy, dz = shift
+    return {src: (dst[0] + dx, dst[1] + dy, dst[2] + dz)
+            for src, dst in mapping.items()}
+
+
+def apply_mapping(grid: VoxelGrid, mapping: dict, bmin: Vec3,
+                  bmax: Vec3) -> tuple[int, set]:
+    """Move each source cell's material to its destination cell.
+
+    Destinations outside the volume are dropped. Occupied destinations are
+    overwritten. Returns (changed cell count, destination cells).
+    """
+    src_mats = {}
+    for cell in mapping:
+        mat = grid.get(*cell)
+        if mat != EMPTY:
+            src_mats[cell] = mat
+    if not src_mats:
+        return 0, set()
+    old = {}
+    out = {}
+    for cell, mat in src_mats.items():
+        old[cell] = mat
+        dest = mapping[cell]
+        if in_bounds(dest, bmin, bmax):
+            out[dest] = mat
+            old.setdefault(dest, grid.get(*dest))
+    for cell in src_mats:
+        grid.set(*cell, EMPTY)
+    for dest, mat in out.items():
+        grid.set(*dest, mat)
+    changed = sum(1 for cell, val in old.items() if grid.get(*cell) != val)
+    return changed, set(out)
+
+
+def move_selection(grid: VoxelGrid, selection, offset: Vec3,
+                   bmin: Vec3, bmax: Vec3) -> tuple[int, set]:
+    """Translate the selected voxels. Returns (changed, new selection)."""
+    return apply_mapping(grid, move_mapping(selection, offset, bmin, bmax),
+                         bmin, bmax)
+
+
+def rotate_selection(grid: VoxelGrid, selection, axis: int, quarter_turns: int,
+                     bmin: Vec3, bmax: Vec3) -> tuple[int, set]:
+    """Rotate the selected voxels around their centre.
+
+    Returns (changed, new selection). Four quarter turns are the identity.
+    """
+    return apply_mapping(grid,
+                         rotate_mapping(selection, axis, quarter_turns,
+                                        bmin, bmax),
+                         bmin, bmax)
+
+
+# ---------------------------------------------------------------------------
 # extrusion
 
 def face_region(grid: VoxelGrid, cell: Vec3, normal: Vec3,

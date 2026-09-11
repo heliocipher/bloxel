@@ -416,6 +416,105 @@ check("extrude stops columns at the volume boundary",
       and ge2.get(0, 0, 3) == 0)
 
 # ---------------------------------------------------------------------------
+section("grid: selection transform (move / rotate)")
+from bloxel.core.grid import (apply_mapping, clamp_offset, fit_offset,
+                              move_mapping, move_selection, rotate_mapping,
+                              rotate_selection, rotated_cells,
+                              selection_bounds, transform_center,
+                              translated_cells)
+
+tb0, tb1 = (0, 0, 0), (31, 31, 31)
+check("selection bounds: min/max over cells",
+      selection_bounds({(1, 2, 3), (4, 0, 5)}) == ((1, 0, 3), (4, 2, 5)))
+check("selection bounds: empty selection is None",
+      selection_bounds(set()) is None)
+check("transform centre: visual block centre",
+      transform_center(((0, 0, 0), (1, 1, 1))) == (1.0, 1.0, 1.0)
+      and transform_center(((2, 2, 2), (2, 2, 2))) == (2.5, 2.5, 2.5))
+check("clamp offset: stays inside the volume",
+      clamp_offset((28, 0, 0), (30, 0, 0), (5, 0, 0), tb0, tb1) == (1, 0, 0)
+      and clamp_offset((28, 0, 0), (30, 0, 0), (-100, 0, 0), tb0, tb1)
+      == (-28, 0, 0))
+check("translated cells maps every cell",
+      translated_cells({(0, 0, 0), (1, 0, 0)}, (0, 2, -1))
+      == {(0, 0, 0): (0, 2, -1), (1, 0, 0): (1, 2, -1)})
+
+# L-shape, pivot (1, 1, 0.5): the two directions must differ
+l_cells = {(0, 0, 0), (1, 0, 0), (0, 1, 0)}
+l_pivot = transform_center(selection_bounds(l_cells))
+cw = rotated_cells(l_cells, 2, 1, l_pivot)
+ccw = rotated_cells(l_cells, 2, -1, l_pivot)
+check("rotate 90 about z snaps to the lattice",
+      set(cw.values()) == {(0, 0, 0), (1, 0, 0), (1, 1, 0)})
+check("rotate -90 takes the other direction",
+      set(ccw.values()) == {(0, 0, 0), (0, 1, 0), (1, 1, 0)})
+check("rotation is injective",
+      len(set(cw.values())) == len(l_cells))
+check("four quarter turns are the identity",
+      rotated_cells(l_cells, 2, 4, l_pivot) == {c: c for c in l_cells})
+check("fit offset: pulls a protruding block back in",
+      fit_offset((30, 0, 0), (33, 0, 0), tb0, tb1) == (-2, 0, 0))
+check("fit offset: pushes a low block up",
+      fit_offset((-5, 0, 0), (2, 0, 0), tb0, tb1) == (5, 0, 0))
+check("fit offset: zero when already inside",
+      fit_offset((3, 4, 5), (6, 7, 8), tb0, tb1) == (0, 0, 0))
+
+gt = VoxelGrid()
+for x, v in enumerate((1, 2, 3)):
+    gt.set(x, 0, 0, v)
+t_sel = {(0, 0, 0), (1, 0, 0), (2, 0, 0)}
+mapping = move_mapping(t_sel, (1, 0, 0), tb0, tb1)
+check("move mapping shifts cells",
+      set(mapping.values()) == {(1, 0, 0), (2, 0, 0), (3, 0, 0)})
+check("move mapping clamps at the volume edge",
+      move_mapping({(30, 0, 0)}, (5, 0, 0), tb0, tb1)
+      == {(30, 0, 0): (31, 0, 0)})
+check("move by zero produces no mapping",
+      move_mapping(t_sel, (0, 0, 0), tb0, tb1) == {})
+changed, t_new = apply_mapping(gt, mapping, tb0, tb1)
+check("apply mapping moves materials",
+      changed == 4 and gt.voxel_count() == 3
+      and [gt.get(x, 0, 0) for x in range(4)] == [0, 1, 2, 3]
+      and t_new == {(1, 0, 0), (2, 0, 0), (3, 0, 0)})
+check("move selection by zero changes nothing",
+      move_selection(gt, {(1, 0, 0)}, (0, 0, 0), tb0, tb1) == (0, set()))
+
+gc = VoxelGrid()
+gc.set(0, 0, 0, 1)
+gc.set(1, 0, 0, 9)
+changed, c_sel = move_selection(gc, {(0, 0, 0)}, (1, 0, 0), tb0, tb1)
+check("move overwrites occupied destinations",
+      changed == 2 and gc.get(0, 0, 0) == 0 and gc.get(1, 0, 0) == 1
+      and c_sel == {(1, 0, 0)})
+gm2 = VoxelGrid()
+gm2.set(31, 0, 0, 1)
+check("move clamps fully at the volume edge",
+      move_selection(gm2, {(31, 0, 0)}, (1, 0, 0), tb0, tb1) == (0, set())
+      and gm2.get(31, 0, 0) == 1)
+
+gr = VoxelGrid()
+gr.set(0, 0, 0, 1)
+gr.set(1, 0, 0, 2)
+gr.set(0, 1, 0, 3)
+changed, r_sel = rotate_selection(gr, l_cells, 2, 1, tb0, tb1)
+check("rotate selection turns the L-shape",
+      changed == 4 and r_sel == {(0, 0, 0), (1, 0, 0), (1, 1, 0)}
+      and gr.get(0, 0, 0) == 3 and gr.get(1, 0, 0) == 1
+      and gr.get(1, 1, 0) == 2 and gr.get(0, 1, 0) == 0)
+check("rotate selection: four turns is a no-op",
+      rotate_selection(gr, r_sel, 2, 4, tb0, tb1) == (0, set()))
+
+gf2 = VoxelGrid()
+for x in range(3):
+    gf2.set(x, 0, 31, 1)
+changed, f_sel = rotate_selection(gf2, {(0, 0, 31), (1, 0, 31), (2, 0, 31)},
+                                  1, 1, tb0, tb1)
+check("rotation is shifted back into the volume",
+      f_sel == {(1, 0, 29), (1, 0, 30), (1, 0, 31)}
+      and gf2.voxel_count() == 3
+      and all(gf2.get(*c) == 1 for c in f_sel))
+
+# ---------------------------------------------------------------------------
 section("extrude: screen-space drag math")
 import math
 from bloxel.tools.extrude import drag_along_axis
@@ -578,6 +677,89 @@ check("selection geometry: box corners stay on the cell",
       and lines[:, 1].min() == 0.0 and lines[:, 1].max() == 3.0)
 
 # ---------------------------------------------------------------------------
+section("gizmo: handles and picking")
+from bloxel.core import gizmo
+from bloxel.core.gizmo import _point_segment_distance, nearest_handle
+from mathutils import Vector
+
+origin = Vector((0.0, 0.0, 0.0))
+gz_axes = (Vector((1.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)),
+           Vector((0.0, 0.0, 1.0)))
+gz_half = (1.0, 2.0, 3.0)      # cage half-extents
+gz_radii = (4.5, 4.5, 4.5)     # uniform half-ring radius
+check("all rings share the largest cage cross-section diagonal",
+      gizmo.cage_radius(gz_half) == math.hypot(3.0, 2.0)
+      and gizmo.cage_radius((3.0, 4.0, 0.0)) == 5.0)
+gz = gizmo.handles(origin, gz_axes, gz_half, 10.0, gz_radii)
+check("gizmo has three arrows and three half-rings", len(gz) == 6
+      and all((gizmo.MOVE, a) in gz for a in range(3))
+      and all((gizmo.ROTATE, a) in gz for a in range(3)))
+check("move shaft runs from the cage face outward",
+      gz[(gizmo.MOVE, 0)][0] == (Vector((1.0, 0.0, 0.0)),
+                                 Vector((11.0, 0.0, 0.0))))
+ring = gz[(gizmo.ROTATE, 2)]
+check("rotation handle is a half-ring hugging the cage",
+      len(ring) == gizmo.RING_SEGMENTS // 2
+      and all(abs(a.z) < 1e-9 and abs(b.z) < 1e-9 for a, b in ring)
+      and all(abs(a.length - gz_radii[2]) < 1e-6 for a, _ in ring))
+check("half-ring spans 180 degrees around the ring plane diagonal",
+      max(a.x for a, _ in ring) > gz_radii[2] - 1e-6
+      and max(a.y for a, _ in ring) > gz_radii[2] - 1e-6
+      and not any(a.x < -1e-6 and a.y < -1e-6 for a, _ in ring))
+
+from bloxel.core.gizmo import bounds_segments, handle_tris
+
+tri = handle_tris(origin, gz_axes, gz_half, 10.0, gz_radii, 0.6)
+check("gizmo handles are solid with a constant-width cross-section",
+      len(tri) == 6
+      and all(len(tri[(gizmo.MOVE, a)]) == 14 for a in range(3))
+      and all(len(tri[(gizmo.ROTATE, a)]) == gizmo.RING_SEGMENTS
+              for a in range(3)))
+shaft = tri[(gizmo.MOVE, 0)][:8]
+check("move shaft beam sits on the cage face with the requested thickness",
+      all(abs(p.y) <= 0.3 + 1e-6 and abs(p.z) <= 0.3 + 1e-6
+          and p.x >= 1.0 - 1e-6 for t in shaft for p in t))
+check("arrow head flares wider than the shaft",
+      max(abs(p.y) for t in tri[(gizmo.MOVE, 0)] for p in t) > 0.5)
+ribbon = tri[(gizmo.ROTATE, 2)]
+ribbon_in = gz_radii[2] - 0.3
+ribbon_out = gz_radii[2] + 0.3
+check("half-ring ribbon spans the ring radius",
+      all(abs(p.z) < 1e-9
+          and ribbon_in - 1e-6 <= math.hypot(p.x, p.y) <= ribbon_out + 1e-6
+          for t in ribbon for p in t))
+
+box_info = gizmo.GizmoInfo(origin, gz_axes, 10.0, (0.0, 0.0),
+                           ((0.0, 0.0),) * 3, (True, True, True),
+                           ((0, 0, 0), (1, 2, 0)), Matrix.Identity(4),
+                           gz_half, gz_radii, 5.0)
+box = bounds_segments(box_info)
+lo = (0.0, 0.0, 0.0)
+hi = (2.0, 3.0, 1.0)
+check("dotted bounds box: dashes on the selection box surface",
+      len(box) >= 12
+      and all(all(lo[i] - 1e-6 <= p[i] <= hi[i] + 1e-6 for i in range(3))
+              and any(abs(p[i] - lo[i]) < 1e-6 or abs(p[i] - hi[i]) < 1e-6
+                      for i in range(3))
+              for a, b in box for p in (a, b)))
+
+check("point-segment distance: on the segment is zero",
+      _point_segment_distance(5.0, 0.0, 0.0, 0.0, 10.0, 0.0) == 0.0)
+check("point-segment distance: past the endpoint clamps",
+      _point_segment_distance(15.0, 0.0, 0.0, 0.0, 10.0, 0.0) == 5.0)
+check("point-segment distance: perpendicular",
+      _point_segment_distance(5.0, 3.0, 0.0, 0.0, 10.0, 0.0) == 3.0)
+gz_flat = {(gizmo.MOVE, 0): [((0.0, 0.0), (50.0, 0.0))],
+           (gizmo.ROTATE, 1): [((0.0, 40.0), (50.0, 40.0))]}
+check("nearest handle picks the closer segment",
+      nearest_handle((10.0, 3.0), gz_flat) == (gizmo.MOVE, 0)
+      and nearest_handle((10.0, 37.0), gz_flat) == (gizmo.ROTATE, 1))
+check("nearest handle ignores far clicks",
+      nearest_handle((10.0, 200.0), gz_flat) is None)
+check("nearest handle respects a custom threshold",
+      nearest_handle((10.0, 15.0), gz_flat, threshold=25.0) == (gizmo.MOVE, 0))
+
+# ---------------------------------------------------------------------------
 section("blender integration")
 import bpy
 import bloxel
@@ -614,6 +796,12 @@ check("rectangle select op registered",
 check("rect select mode default is visible",
       bpy.context.scene.bloxel_tools.rect_select_mode == 'VISIBLE')
 check("line op registered", bpy.ops.bloxel.line.get_rna_type() is not None)
+check("transform op registered",
+      bpy.ops.bloxel.transform.get_rna_type() is not None)
+check("gizmo info/pick/tool checks are viewport-safe",
+      gizmo.info(bpy.context) is None
+      and gizmo.pick(bpy.context, (0, 0)) is None
+      and gizmo.tool_active(bpy.context) is False)
 check("cursor op registered", bpy.ops.bloxel.brush_cursor.get_rna_type() is not None)
 check("extrude op registered", bpy.ops.bloxel.extrude.get_rna_type() is not None)
 check("export op registered", bpy.ops.bloxel.export_godot.get_rna_type() is not None)
