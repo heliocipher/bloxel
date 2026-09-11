@@ -14,7 +14,7 @@ bl_info = {
 }
 
 from .core import draw, gizmo, palette, state  # noqa: E402
-from .ops import basic, export  # noqa: E402
+from .ops import basic, clipboard, export  # noqa: E402
 from .tools import (brush, common, extrude, fill, line, picker,  # noqa: E402
                     select, transform, workspace)
 from .ui import panels  # noqa: E402
@@ -31,6 +31,8 @@ _CLASSES = (
     fill.BLOXEL_OT_fill,
     select.BLOXEL_OT_fuzzy_select,
     select.BLOXEL_OT_rect_select,
+    clipboard.BLOXEL_OT_copy,
+    clipboard.BLOXEL_OT_paste,
     transform.BLOXEL_OT_transform,
     extrude.BLOXEL_OT_extrude,
     picker.BLOXEL_OT_picker,

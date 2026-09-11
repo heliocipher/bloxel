@@ -821,6 +821,45 @@ def rotate_selection(grid: VoxelGrid, selection, axis: int, quarter_turns: int,
 
 
 # ---------------------------------------------------------------------------
+# clipboard (copy / paste)
+
+def copy_block(grid: VoxelGrid, cells, origin: Vec3) -> dict:
+    """Copy live voxels as {offset from `origin`: material}.
+
+    `origin` is normally the block's min corner (see selection_bounds), so
+    relative offsets are non-negative and always fit the volume.
+    """
+    out = {}
+    for cell in cells:
+        mat = grid.get(*cell)
+        if mat != EMPTY:
+            out[(cell[0] - origin[0], cell[1] - origin[1],
+                 cell[2] - origin[2])] = mat
+    return out
+
+
+def paste_block(grid: VoxelGrid, block: dict, origin: Vec3,
+                bmin: Vec3, bmax: Vec3) -> tuple[int, set]:
+    """Write a copied block with its min corner at `origin`.
+
+    Cells outside the working volume are dropped. Occupied destinations are
+    overwritten. Returns (changed cells, written cells); the written set
+    holds every live pasted cell even where the material did not change, so
+    the caller can select the block after a paste in place.
+    """
+    changed = 0
+    written = set()
+    for (dx, dy, dz), mat in block.items():
+        cell = (origin[0] + dx, origin[1] + dy, origin[2] + dz)
+        if not in_bounds(cell, bmin, bmax):
+            continue
+        written.add(cell)
+        if grid.set(*cell, mat):
+            changed += 1
+    return changed, written
+
+
+# ---------------------------------------------------------------------------
 # extrusion
 
 def face_region(grid: VoxelGrid, cell: Vec3, normal: Vec3,

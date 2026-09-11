@@ -1,7 +1,17 @@
 """Toolbar registration (WorkSpaceTool) and shared tool settings."""
 from __future__ import annotations
 
+import sys
+
 import bpy
+
+# Copy/paste work while any Bloxel tool is active (mouse over the viewport).
+# Cmd on macOS, Ctrl on Windows and Linux.
+_CLIPBOARD_MOD = "oskey" if sys.platform == "darwin" else "ctrl"
+_CLIPBOARD_KEYMAP = (
+    ("bloxel.copy", {"type": 'C', "value": 'PRESS', _CLIPBOARD_MOD: True}, None),
+    ("bloxel.paste", {"type": 'V', "value": 'PRESS', _CLIPBOARD_MOD: True}, None),
+)
 
 
 class BloxelToolSettings(bpy.types.PropertyGroup):
@@ -85,7 +95,7 @@ class BLOXEL_WT_brush(bpy.types.WorkSpaceTool):
          {"properties": [("tool_mode", 'BRUSH')]}),
         ("bloxel.brush_cursor", {"type": 'MOUSEMOVE', "value": 'ANY'},
          {"properties": [("tool_mode", 'BRUSH')]}),
-    )
+    ) + _CLIPBOARD_KEYMAP
     draw_settings = staticmethod(_draw_brush_settings)
 
 
@@ -101,7 +111,7 @@ class BLOXEL_WT_eraser(bpy.types.WorkSpaceTool):
          {"properties": [("tool_mode", 'ERASER')]}),
         ("bloxel.brush_cursor", {"type": 'MOUSEMOVE', "value": 'ANY'},
          {"properties": [("tool_mode", 'ERASER')]}),
-    )
+    ) + _CLIPBOARD_KEYMAP
     draw_settings = staticmethod(_draw_eraser_settings)
 
 
@@ -114,7 +124,7 @@ class BLOXEL_WT_line(bpy.types.WorkSpaceTool):
     bl_icon = "ops.gpencil.draw.line"
     bl_keymap = (
         ("bloxel.line", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
-    )
+    ) + _CLIPBOARD_KEYMAP
 
 
 class BLOXEL_WT_fill(bpy.types.WorkSpaceTool):
@@ -126,7 +136,7 @@ class BLOXEL_WT_fill(bpy.types.WorkSpaceTool):
     bl_icon = "brush.gpencil_draw.fill"
     bl_keymap = (
         ("bloxel.fill", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
-    )
+    ) + _CLIPBOARD_KEYMAP
     draw_settings = staticmethod(_draw_fill_settings)
 
 
@@ -140,7 +150,7 @@ class BLOXEL_WT_select(bpy.types.WorkSpaceTool):
     bl_icon = "ops.sculpt.mask_by_color"
     bl_keymap = (
         ("bloxel.fuzzy_select", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
-    )
+    ) + _CLIPBOARD_KEYMAP
     draw_settings = staticmethod(_draw_select_settings)
 
 
@@ -154,7 +164,7 @@ class BLOXEL_WT_rect_select(bpy.types.WorkSpaceTool):
     bl_icon = "ops.generic.select_box"
     bl_keymap = (
         ("bloxel.rect_select", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
-    )
+    ) + _CLIPBOARD_KEYMAP
     draw_settings = staticmethod(_draw_rect_select_settings)
 
 
@@ -168,7 +178,7 @@ class BLOXEL_WT_transform(bpy.types.WorkSpaceTool):
     bl_icon = "ops.transform.transform"
     bl_keymap = (
         ("bloxel.transform", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
-    )
+    ) + _CLIPBOARD_KEYMAP
 
 
 class BLOXEL_WT_extrude(bpy.types.WorkSpaceTool):
@@ -180,7 +190,7 @@ class BLOXEL_WT_extrude(bpy.types.WorkSpaceTool):
     bl_icon = "ops.mesh.extrude_faces_move"
     bl_keymap = (
         ("bloxel.extrude", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
-    )
+    ) + _CLIPBOARD_KEYMAP
 
 
 class BLOXEL_WT_picker(bpy.types.WorkSpaceTool):
@@ -192,4 +202,4 @@ class BLOXEL_WT_picker(bpy.types.WorkSpaceTool):
     bl_icon = "ops.paint.eyedropper_add"
     bl_keymap = (
         ("bloxel.picker", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
-    )
+    ) + _CLIPBOARD_KEYMAP

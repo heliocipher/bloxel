@@ -798,6 +798,14 @@ check("rect select mode default is visible",
 check("line op registered", bpy.ops.bloxel.line.get_rna_type() is not None)
 check("transform op registered",
       bpy.ops.bloxel.transform.get_rna_type() is not None)
+check("copy op registered", bpy.ops.bloxel.copy.get_rna_type() is not None)
+check("paste op registered", bpy.ops.bloxel.paste.get_rna_type() is not None)
+from bloxel.tools.workspace import _CLIPBOARD_KEYMAP
+_clip_mod = "oskey" if sys.platform == "darwin" else "ctrl"
+check("clipboard shortcuts use Cmd on macOS, Ctrl elsewhere",
+      all(item[1].get(_clip_mod) is True
+          and not any(k in item[1] for k in ("ctrl", "oskey") if k != _clip_mod)
+          for item in _CLIPBOARD_KEYMAP))
 check("gizmo info/pick/tool checks are viewport-safe",
       gizmo.info(bpy.context) is None
       and gizmo.pick(bpy.context, (0, 0)) is None
@@ -954,6 +962,80 @@ check("line diagonal is gap-free and connects both endpoints",
       and all(abs(diag[i + 1][0] - diag[i][0]) <= 1
               and abs(diag[i + 1][1] - diag[i][1]) <= 1
               for i in range(len(diag) - 1)))
+
+# ---------------------------------------------------------------------------
+section("move & rotate: operator core path")
+from bloxel.tools.transform import apply_transform
+
+bpy.ops.bloxel.new_model('EXEC_DEFAULT')
+obj_x = bpy.context.active_object
+rt_x = state.runtime(obj_x)
+xb0, xb1 = state.get_bounds(obj_x)
+for x in range(3):
+    rt_x.grid.set(x, 0, 0, x + 1)
+rt_x.selection = {(0, 0, 0), (1, 0, 0), (2, 0, 0)}
+# what the modal does per mousemove: build the mapping, preview its values
+mapping = move_mapping(rt_x.selection, (0, 1, 0), xb0, xb1)
+check("operator path: move mapping is the ghost preview",
+      set(mapping.values()) == {(0, 1, 0), (1, 1, 0), (2, 1, 0)})
+changed, x_sel = apply_transform(obj_x, rt_x, mapping, xb0, xb1)
+check("operator path: apply moves the run",
+      changed == 6 and rt_x.grid.voxel_count() == 3
+      and [rt_x.grid.get(x, 1, 0) for x in range(3)] == [1, 2, 3])
+check("operator path: mesh follows the moved voxels",
+      len(obj_x.data.polygons) == 14  # 3 adjacent voxels: 18 - 2 culled pairs
+      and abs(min(v.co.y for v in obj_x.data.vertices) - 1.0) < 1e-6)
+state.clear_runtimes()
+rt_x2 = state.runtime(obj_x)
+check("operator path: moved selection persists",
+      rt_x2.selection == {(0, 1, 0), (1, 1, 0), (2, 1, 0)}
+      and rt_x2.grid.get(2, 1, 0) == 3)
+rmap = rotate_mapping(rt_x2.selection, 2, 1, xb0, xb1)
+changed, r_sel2 = apply_transform(obj_x, rt_x2, rmap, xb0, xb1)
+check("operator path: rotation turns the run upright",
+      changed == 4 and r_sel2 == {(1, 0, 0), (1, 1, 0), (1, 2, 0)}
+      and rt_x2.grid.get(1, 0, 0) == 1 and rt_x2.grid.get(1, 2, 0) == 3)
+check("operator path: mesh rebuilds after rotation",
+      len(obj_x.data.polygons) == 14
+      and abs(min(v.co.x for v in obj_x.data.vertices) - 1.0) < 1e-6
+      and abs(max(v.co.x for v in obj_x.data.vertices) - 2.0) < 1e-6)
+check("operator path: rotated selection persisted",
+      state.runtime(obj_x).selection == r_sel2)
+
+# ---------------------------------------------------------------------------
+section("copy & paste: operator core path")
+from bloxel.core.grid import paste_block
+from bloxel.ops import clipboard as clip
+
+bpy.ops.bloxel.new_model('EXEC_DEFAULT')
+obj_cp = bpy.context.active_object
+rt_cp = state.runtime(obj_cp)
+cp_b0, cp_b1 = state.get_bounds(obj_cp)
+rt_cp.grid.set(2, 1, 4, 3)
+rt_cp.grid.set(3, 1, 4, 5)
+rt_cp.grid.set(9, 9, 9, 7)  # unselected: must not be copied
+rt_cp.selection = {(2, 1, 4), (3, 1, 4)}
+state.commit(obj_cp, rt_cp)
+bpy.ops.bloxel.copy('EXEC_DEFAULT')
+stored = clip.clipboard()
+check("copy stores the block relative to its min corner",
+      stored is not None and stored[1] == (2, 1, 4)
+      and stored[0] == {(0, 0, 0): 3, (1, 0, 0): 5})
+rt_cp.grid.set(2, 1, 4, 0)
+rt_cp.grid.set(3, 1, 4, 0)
+bpy.ops.bloxel.paste('EXEC_DEFAULT')
+check("paste restores the voxels in place and selects them",
+      rt_cp.grid.get(2, 1, 4) == 3 and rt_cp.grid.get(3, 1, 4) == 5
+      and rt_cp.selection == {(2, 1, 4), (3, 1, 4)})
+check("paste rebuilds the mesh (adjacent pair + untouched lone voxel)",
+      len(obj_cp.data.polygons) == 16)  # pair: 12 - 2 culled; lone: 6
+state.clear_runtimes()
+check("paste result persists through reload",
+      state.runtime(obj_cp).selection == {(2, 1, 4), (3, 1, 4)})
+_, written = paste_block(state.runtime(obj_cp).grid, stored[0],
+                         (31, 31, 31), cp_b0, cp_b1)
+check("paste drops cells outside the working volume",
+      written == {(31, 31, 31)})
 
 # ---------------------------------------------------------------------------
 section("extrude integration")
