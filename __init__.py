@@ -15,7 +15,8 @@ bl_info = {
 
 from .core import draw, palette, state  # noqa: E402
 from .ops import basic, export  # noqa: E402
-from .tools import brush, common, extrude, fill, picker, select, workspace  # noqa: E402
+from .tools import (brush, common, extrude, fill, line, picker,  # noqa: E402
+                    select, workspace)
 from .ui import panels  # noqa: E402
 
 _CLASSES = (
@@ -26,6 +27,7 @@ _CLASSES = (
     brush.BLOXEL_OT_brush,
     brush.BLOXEL_OT_eraser,
     brush.BLOXEL_OT_brush_cursor,
+    line.BLOXEL_OT_line,
     fill.BLOXEL_OT_fill,
     select.BLOXEL_OT_fuzzy_select,
     select.BLOXEL_OT_rect_select,
@@ -38,6 +40,7 @@ _CLASSES = (
 _TOOLS = (
     workspace.BLOXEL_WT_brush,
     workspace.BLOXEL_WT_eraser,
+    workspace.BLOXEL_WT_line,
     workspace.BLOXEL_WT_fill,
     workspace.BLOXEL_WT_select,
     workspace.BLOXEL_WT_rect_select,

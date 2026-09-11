@@ -613,6 +613,7 @@ check("rectangle select op registered",
       bpy.ops.bloxel.rect_select.get_rna_type() is not None)
 check("rect select mode default is visible",
       bpy.context.scene.bloxel_tools.rect_select_mode == 'VISIBLE')
+check("line op registered", bpy.ops.bloxel.line.get_rna_type() is not None)
 check("cursor op registered", bpy.ops.bloxel.brush_cursor.get_rna_type() is not None)
 check("extrude op registered", bpy.ops.bloxel.extrude.get_rna_type() is not None)
 check("export op registered", bpy.ops.bloxel.export_godot.get_rna_type() is not None)
@@ -739,6 +740,32 @@ check("repainted mesh keeps face count", len(obj2.data.polygons) == 6 * 9 - 2 * 
 # across materials, by design)
 check("repainted faces use slot 5 (palette 6 - 1)",
       sum(1 for p in obj2.data.polygons if p.material_index == 5) == 8)
+
+# ---------------------------------------------------------------------------
+section("line tool simulation (operator core path)")
+bpy.ops.bloxel.new_model('EXEC_DEFAULT')
+obj_ln = bpy.context.active_object
+rt_ln = state.runtime(obj_ln)
+bmin_ln, bmax_ln = state.get_bounds(obj_ln)
+for x in range(5):
+    rt_ln.grid.set(x, 0, 4, 1)  # plate; ADD placement lands on z=5
+mat_ln = pal.active_index(obj_ln)
+added = 0
+for cell in walk_line((0, 0, 5), (4, 0, 5)):
+    added += apply_brush(rt_ln.grid, cell, (0, 0, 1), 'SQUARE', 1,
+                         'ADD', mat_ln, bmin_ln, bmax_ln)
+check("line core path places a straight run of voxels", added == 5
+      and all(rt_ln.grid.get(x, 0, 5) == mat_ln for x in range(5)))
+check("line leaves the original surface alone",
+      all(rt_ln.grid.get(x, 0, 4) == 1 for x in range(5)))
+diag = list(walk_line((0, 0, 10), (3, 3, 10)))
+counts = sum(apply_brush(rt_ln.grid, cell, (0, 0, 1), 'SQUARE', 1,
+                         'ADD', mat_ln, bmin_ln, bmax_ln) for cell in diag)
+check("line diagonal is gap-free and connects both endpoints",
+      counts == len(diag) and diag[0] == (0, 0, 10) and diag[-1] == (3, 3, 10)
+      and all(abs(diag[i + 1][0] - diag[i][0]) <= 1
+              and abs(diag[i + 1][1] - diag[i][1]) <= 1
+              for i in range(len(diag) - 1)))
 
 # ---------------------------------------------------------------------------
 section("extrude integration")

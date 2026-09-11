@@ -105,6 +105,18 @@ class BLOXEL_WT_eraser(bpy.types.WorkSpaceTool):
     draw_settings = staticmethod(_draw_eraser_settings)
 
 
+class BLOXEL_WT_line(bpy.types.WorkSpaceTool):
+    bl_space_type = 'VIEW_3D'
+    bl_context_mode = 'OBJECT'
+    bl_idname = "bloxel.line_tool"
+    bl_label = "Voxel Line"
+    bl_description = "Click and drag to draw a straight line of voxels"
+    bl_icon = "ops.gpencil.draw.line"
+    bl_keymap = (
+        ("bloxel.line", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+    )
+
+
 class BLOXEL_WT_fill(bpy.types.WorkSpaceTool):
     bl_space_type = 'VIEW_3D'
     bl_context_mode = 'OBJECT'
